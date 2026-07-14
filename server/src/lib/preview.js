@@ -1,7 +1,16 @@
-import sharp from 'sharp';
-
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const PDF_TYPE = 'application/pdf';
+
+// Loaded lazily (not at module top level) so that a broken/missing sharp
+// native binary only breaks preview generation, not the entire app — sharp
+// failing to load used to take down every route (including unrelated ones
+// like auth and project listing), since this module is imported eagerly by
+// the route chain that assembles the Express app.
+let sharpPromise;
+function getSharp() {
+  if (!sharpPromise) sharpPromise = import('sharp').then((m) => m.default);
+  return sharpPromise;
+}
 
 export function isPreviewable(mimeType) {
   return IMAGE_TYPES.has(mimeType) || mimeType === PDF_TYPE;
@@ -13,6 +22,7 @@ export function isPreviewable(mimeType) {
  */
 export async function generatePreview(buffer, mimeType) {
   if (IMAGE_TYPES.has(mimeType)) {
+    const sharp = await getSharp();
     const resized = await sharp(buffer)
       .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
       .jpeg({ quality: 82 })
@@ -22,7 +32,7 @@ export async function generatePreview(buffer, mimeType) {
 
   if (mimeType === PDF_TYPE) {
     // First-page raster thumbnail. Uses pdf-to-img (pdf.js under the hood).
-    const { pdf } = await import('pdf-to-img');
+    const [{ pdf }, sharp] = await Promise.all([import('pdf-to-img'), getSharp()]);
     const doc = await pdf(buffer, { scale: 2 });
     for await (const page of doc) {
       const resized = await sharp(page).resize({ width: 1600, withoutEnlargement: true }).jpeg({ quality: 82 }).toBuffer();
@@ -89,7 +99,7 @@ export async function renderPdfPage(versionId, pageNumber, fetchBuffer) {
     cached.at = Date.now();
     return cached.buffer;
   }
-  const entry = await getDoc_(versionId, fetchBuffer);
+  const [entry, sharp] = await Promise.all([getDoc_(versionId, fetchBuffer), getSharp()]);
   const page = await entry.doc.getPage(pageNumber);
   const jpeg = await sharp(page).resize({ width: 1600, withoutEnlargement: true }).jpeg({ quality: 82 }).toBuffer();
   pageCache.set(cacheKey, { buffer: jpeg, at: Date.now() });
