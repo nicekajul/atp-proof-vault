@@ -1,6 +1,7 @@
 {
   "name": "atp-proof-vault",
   "private": true,
+  "type": "module",
   "workspaces": [
     "client",
     "server"
