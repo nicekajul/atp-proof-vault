@@ -25,6 +25,7 @@ router.get('/preview/:versionId/pdf-meta', resolveVersionScope, requireProjectAc
   }
   try {
     const pageCount = await getPdfPageCount(version.id, async () => (await readObjectBuffer(version.driveFileId)).buffer);
+    res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
     res.json({ pageCount });
   } catch {
     res.status(404).json({ error: 'File not found' });
@@ -44,7 +45,8 @@ router.get('/preview/:versionId/pdf-page/:n', resolveVersionScope, requireProjec
   try {
     const jpeg = await renderPdfPage(version.id, pageNumber, async () => (await readObjectBuffer(version.driveFileId)).buffer);
     res.setHeader('Content-Type', 'image/jpeg');
-    res.setHeader('Cache-Control', 'private, max-age=300');
+    // Same immutability reasoning as the main preview route below.
+    res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
     res.end(jpeg);
   } catch {
     res.status(404).json({ error: 'Page not found' });
@@ -58,16 +60,8 @@ router.get('/preview/:versionId/pdf-page/:n', resolveVersionScope, requireProjec
  * support). Requires either a team session or an author session scoped to
  * the version's project; the Drive file id is never exposed to the client.
  */
-router.get('/preview/:versionId', async (req, res, next) => {
-  // Resolve the owning project first so requireProjectAccess can check scope.
-  const version = await findRow('AssetVersions', 'id', req.params.versionId);
-  if (!version) return res.status(404).json({ error: 'Not found' });
-  const asset = await findRow('Assets', 'id', version.assetId);
-  if (!asset) return res.status(404).json({ error: 'Not found' });
-  req.params.projectId = asset.projectId;
-  next();
-}, requireProjectAccess, async (req, res) => {
-  const version = await findRow('AssetVersions', 'id', req.params.versionId);
+router.get('/preview/:versionId', resolveVersionScope, requireProjectAccess, async (req, res) => {
+  const version = req.version;
   if (String(version.external) === 'true' || version.external === true) {
     return res.status(400).json({ error: 'This version is an external link — use its embedUrl instead.' });
   }
@@ -85,7 +79,11 @@ router.get('/preview/:versionId', async (req, res, next) => {
   const range = req.headers.range;
 
   res.setHeader('Content-Type', mimeType);
-  res.setHeader('Cache-Control', 'private, max-age=60');
+  // versionId is immutable — a version's file content never changes once
+  // uploaded (edits always create a new version), so it's safe to let the
+  // browser cache this indefinitely instead of re-fetching through the slow
+  // Apps Script/Drive round trip on every page reload.
+  res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
   res.setHeader('Accept-Ranges', 'bytes');
 
   if (range) {

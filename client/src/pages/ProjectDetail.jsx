@@ -27,9 +27,27 @@ export default function ProjectDetail() {
     load();
   }, [id]);
 
+  useEffect(() => {
+    if (tab === 'activity') loadActivity();
+  }, [tab, id]);
+
+  // Full reload: project (title/stage/author) + assets. Used on first load
+  // and after anything that could touch the project itself (stage change).
   function load() {
     api.get(`/projects/${id}`).then(({ data }) => setProject(data.project)).catch(() => setLoadError(true));
+    loadAssets();
+  }
+
+  // Most actions (upload, delete, comment, approve) only change the assets
+  // list, not the project record or activity log — refreshing just this
+  // avoids two extra round trips on every single interaction.
+  function loadAssets() {
     api.get(`/projects/${id}/assets`).then(({ data }) => setAssets(data.assets)).catch(() => {});
+  }
+
+  // Activity is its own tab and isn't shown anywhere else, so it's only
+  // fetched when that tab is actually opened rather than on every load.
+  function loadActivity() {
     api.get(`/projects/${id}/activity`).then(({ data }) => setActivity(data.activity)).catch(() => {});
   }
 
@@ -114,7 +132,7 @@ export default function ProjectDetail() {
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               {assets.map((a) => (
-                <AssetCard key={a.id} asset={a} onUploaded={load} />
+                <AssetCard key={a.id} asset={a} onUploaded={loadAssets} />
               ))}
               {assets.length === 0 && <p className="text-gray-400">No proofs uploaded yet.</p>}
             </div>
@@ -141,7 +159,7 @@ export default function ProjectDetail() {
           projectId={id}
           department={project.publisher}
           onClose={() => setShowUpload(false)}
-          onDone={() => { setShowUpload(false); load(); }}
+          onDone={() => { setShowUpload(false); loadAssets(); }}
         />
       )}
 
